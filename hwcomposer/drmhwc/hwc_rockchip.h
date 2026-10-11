@@ -223,6 +223,8 @@ typedef struct hwc_drm_display {
   int rel_yres;
   int v_total;
   int vrefresh;
+  /* primary display: which of display_config_modes() Android picked, 0 = preferred */
+  int config_index;
   int iPlaneSize;
   float w_scale;
   float h_scale;
