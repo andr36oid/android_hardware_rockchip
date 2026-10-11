@@ -505,6 +505,29 @@ static void  *hotplug_event_thread(void *arg){
  * sys.3d_resolution.main 1920x1080p60-114693:148500
  * width x height p|i refresh-flag:clock
  */
+/*
+ * The refresh rates Android can pick on the primary display: the modes with the
+ * size of the preferred mode, the preferred one first. Config i is mode i.
+ */
+static std::vector<DrmMode> display_config_modes(DrmConnector *c)
+{
+  std::vector<DrmMode> list;
+  for (const DrmMode &m : c->modes()) {
+    if (m.type() & DRM_MODE_TYPE_PREFERRED) {
+      list.push_back(m);
+      break;
+    }
+  }
+  if (list.empty())
+    return list;
+  for (const DrmMode &m : c->modes()) {
+    if (!(m.type() & DRM_MODE_TYPE_PREFERRED) && !m.interlaced() &&
+        m.h_display() == list[0].h_display() && m.v_display() == list[0].v_display())
+      list.push_back(m);
+  }
+  return list;
+}
+
 static int update_display_bestmode(hwc_drm_display_t *hd, int display, DrmConnector *c)
 {
   char resolution[PROPERTY_VALUE_MAX];
@@ -633,6 +656,14 @@ static int update_display_bestmode(hwc_drm_display_t *hd, int display, DrmConnec
           return 0;
         }
       }
+    }
+  }
+
+  if (display == HWC_DISPLAY_PRIMARY && hd->config_index > 0) {
+    std::vector<DrmMode> list = display_config_modes(c);
+    if ((size_t)hd->config_index < list.size()) {
+      c->set_best_mode(list[hd->config_index]);
+      return 0;
     }
   }
 
@@ -4006,6 +4037,17 @@ static int hwc_get_display_configs(struct hwc_composer_device_1 *dev,
                __FUNCTION__, __LINE__, hd->framebuffer_width,hd->framebuffer_height);
     }
   }
+  std::vector<DrmMode> list;
+  if (display == HWC_DISPLAY_PRIMARY)
+    list = display_config_modes(connector);
+  if (list.size() > 1) {
+    size_t n = std::min(list.size(), *num_configs);
+    for (size_t i = 0; i < n; i++)
+      configs[i] = i;
+    *num_configs = n;
+    return 0;
+  }
+
   *num_configs = 1;
   configs[0] = connector->display();
 
@@ -4029,7 +4071,6 @@ static int hwc_get_display_attributes(struct hwc_composer_device_1 *dev,
                                       int display, uint32_t config,
                                       const uint32_t *attributes,
                                       int32_t *values) {
-  UN_USED(config);
   struct hwc_context_t *ctx = (struct hwc_context_t *)&dev->common;
   DrmConnector *c = ctx->drm.GetConnectorFromType(display);
   if (!c) {
@@ -4044,6 +4085,11 @@ static int hwc_get_display_attributes(struct hwc_composer_device_1 *dev,
   int w = hd->framebuffer_width;
   int h = hd->framebuffer_height;
   int vrefresh = hd->vrefresh;
+  if (display == HWC_DISPLAY_PRIMARY) {
+    std::vector<DrmMode> list = display_config_modes(c);
+    if (list.size() > 1 && config < list.size() && list[config].v_refresh() > 0)
+      vrefresh = list[config].v_refresh();
+  }
 
   for (int i = 0; attributes[i] != HWC_DISPLAY_NO_ATTRIBUTE; ++i) {
     switch (attributes[i]) {
@@ -4072,16 +4118,18 @@ static int hwc_get_display_attributes(struct hwc_composer_device_1 *dev,
 
 static int hwc_get_active_config(struct hwc_composer_device_1 *dev,
                                  int display) {
-  UN_USED(dev);
-  UN_USED(display);
-  return 0;
+  struct hwc_context_t *ctx = (struct hwc_context_t *)&dev->common;
+  DrmConnector *c = ctx->drm.GetConnectorFromType(display);
+  if (display != HWC_DISPLAY_PRIMARY || !c)
+    return 0;
+  int index = ctx->displays[c->display()].config_index;
+  return (size_t)index < display_config_modes(c).size() ? index : 0;
 }
 
 static int hwc_set_active_config(struct hwc_composer_device_1 *dev, int display,
                                  int index) {
   struct hwc_context_t *ctx = (struct hwc_context_t *)&dev->common;
 
-  UN_USED(index);
   DrmConnector *c = ctx->drm.GetConnectorFromType(display);
   if (!c) {
     ALOGE("%s:Failed to get connector for display %d line=%d", __FUNCTION__,display,__LINE__);
@@ -4100,6 +4148,19 @@ static int hwc_set_active_config(struct hwc_composer_device_1 *dev, int display,
 
   hwc_drm_display_t *hd = &ctx->displays[c->display()];
 
+  if (display == HWC_DISPLAY_PRIMARY) {
+    std::vector<DrmMode> list = display_config_modes(c);
+    if (list.size() > 1) {
+      if (index < 0 || (size_t)index >= list.size())
+        return -EINVAL;
+      // another refresh rate: same size, so only the timing changes
+      hd->config_index = index;
+      c->set_best_mode(list[index]);
+      hd->vrefresh = list[index].v_refresh();
+      hd->v_total = list[index].v_total();
+      ALOGI("display %d: config %d, %.2f Hz", display, index, list[index].v_refresh());
+    }
+  }
 
   DrmMode mode = c->best_mode();
   if (!mode.id()) {
