@@ -53,6 +53,7 @@
 #include <stdio.h>
 
 #include <errno.h>
+#include <math.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <sys/param.h>
@@ -4084,17 +4085,25 @@ static int hwc_get_display_attributes(struct hwc_composer_device_1 *dev,
   uint32_t mm_height = c->mm_height();
   int w = hd->framebuffer_width;
   int h = hd->framebuffer_height;
-  int vrefresh = hd->vrefresh;
+  float vrefresh = hd->vrefresh;
   if (display == HWC_DISPLAY_PRIMARY) {
     std::vector<DrmMode> list = display_config_modes(c);
-    if (list.size() > 1 && config < list.size() && list[config].v_refresh() > 0)
-      vrefresh = list[config].v_refresh();
+    if (list.size() > 1 && config < list.size() && list[config].v_refresh() > 0) {
+      const DrmMode &m = list[config];
+      vrefresh = m.v_refresh();
+      // The other rates come from the clock, not the kernel's whole-Hz vrefresh,
+      // so 77.5 and 78 Hz differ. Rounded to 0.01 Hz, as Settings saves the peak
+      // rate: SurfaceFlinger allows only 0.001 Hz over it. The native one keeps
+      // whole Hz, or a 60.05 Hz panel would miss the 60 Hz peak cap.
+      if (config > 0 && m.h_total() && m.v_total())
+        vrefresh = roundf(m.clock() * 100000.0f / (m.h_total() * m.v_total())) / 100.0f;
+    }
   }
 
   for (int i = 0; attributes[i] != HWC_DISPLAY_NO_ATTRIBUTE; ++i) {
     switch (attributes[i]) {
       case HWC_DISPLAY_VSYNC_PERIOD:
-        values[i] = 1000 * 1000 * 1000 / vrefresh;
+        values[i] = (int32_t)(1000.0f * 1000 * 1000 / vrefresh);
         break;
       case HWC_DISPLAY_WIDTH:
         values[i] = w;
