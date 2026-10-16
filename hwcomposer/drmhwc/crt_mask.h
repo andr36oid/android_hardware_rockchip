@@ -37,6 +37,13 @@
  *   persist.andr36oid.crt.strength  0-100, how dark the lines get
  *   persist.andr36oid.crt.pitch     screen rows per scanline, 0 = auto (height / 240)
  *   persist.andr36oid.crt.phase     move the lines down by this many rows
+ *   persist.andr36oid.crt.lines     0 = no lines from here, only SurfaceFlinger's GPU effects
+ *
+ * The GPU effects (curvature, glow, phosphor mask) are SurfaceFlinger's, in a pass over
+ * the whole frame (frameworks/native CrtFilter). Our lines go on top of that pass, so
+ * they stay straight on a curved picture. With the GPU phosphor mask on, the grille and
+ * slot styles drop to plain scanlines and "grille only" draws nothing, so the two masks
+ * never stack.
  */
 
 namespace android {

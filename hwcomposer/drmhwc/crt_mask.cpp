@@ -48,12 +48,22 @@ CrtMaskConfig crt_mask_read_config() {
     return cfg;
   if (property_get_int32("persist.andr36oid.crt.enable", 0) != 1)
     return cfg;
+  /* the GPU effects can be used without the lines */
+  if (property_get_int32("persist.andr36oid.crt.lines", 1) != 1)
+    return cfg;
   cfg.strength = clamp_int(property_get_int32("persist.andr36oid.crt.strength", 50), 0, 100);
   if (cfg.strength == 0)
     return cfg;
   cfg.style = clamp_int(property_get_int32("persist.andr36oid.crt.style", 0), 0,
                         CRT_STYLE_COUNT - 1);
   cfg.pitch = clamp_int(property_get_int32("persist.andr36oid.crt.pitch", 0), 0, 8);
+  /* SurfaceFlinger's coloured phosphor mask is on: it replaces our grille, a second one
+     on top would only darken the picture; the scanlines stay */
+  if (property_get_int32("persist.andr36oid.crt.gpu_mask", 0) > 0) {
+    if (cfg.style == CRT_STYLE_GRILLE)
+      return cfg;
+    cfg.style = CRT_STYLE_SCANLINES;
+  }
   cfg.phase = clamp_int(property_get_int32("persist.andr36oid.crt.phase", 0), 0, 7);
 
   char orient[PROPERTY_VALUE_MAX];
