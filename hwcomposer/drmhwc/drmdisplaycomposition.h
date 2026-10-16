@@ -40,6 +40,7 @@
 #include "drmcrtc.h"
 #include "drmhwcomposer.h"
 #include "drmplane.h"
+#include "crt_mask.h"
 #include "glworker.h"
 
 #include <sstream>
@@ -198,6 +199,17 @@ class DrmDisplayComposition {
 	return mode_3d_;
   }
 
+  void set_crt(DrmPlane *plane, const CrtMaskConfig &cfg) {
+    crt_plane_ = plane;
+    crt_ = cfg;
+  }
+  DrmPlane *crt_plane() const {
+    return crt_plane_;
+  }
+  const CrtMaskConfig &crt() const {
+    return crt_;
+  }
+
   uint32_t dpms_mode() const {
     return dpms_mode_;
   }
@@ -256,6 +268,9 @@ class DrmDisplayComposition {
   LayerMap layer_map_;
 
   uint64_t frame_no_ = 0;
+
+  DrmPlane *crt_plane_ = NULL;
+  CrtMaskConfig crt_;
 };
 }
 

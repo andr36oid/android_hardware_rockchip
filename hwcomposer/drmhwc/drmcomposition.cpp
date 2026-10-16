@@ -136,6 +136,10 @@ int DrmComposition::SetCompPlanes(int display, std::vector<DrmCompositionPlane>&
     return composition_map_[display]->SetCompPlanes(composition_planes);
 }
 
+void DrmComposition::SetCrt(int display, DrmPlane *plane, const CrtMaskConfig &cfg) {
+    composition_map_[display]->set_crt(plane, cfg);
+}
+
 std::unique_ptr<DrmDisplayComposition> DrmComposition::TakeDisplayComposition(
     int display) {
   return std::move(composition_map_[display]);

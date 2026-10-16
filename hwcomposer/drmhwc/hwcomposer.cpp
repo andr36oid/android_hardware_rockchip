@@ -2656,9 +2656,33 @@ static int hwc_prepare(hwc_composer_device_1_t *dev, size_t num_displays,
     hd->hasEotfPlane = false;
     hd->is_interlaced = (mode.interlaced()>0) ? true:false;
     hd->bPreferMixDown = false;
+    /* CRT effect: the top window (win2, the cursor plane) is kept for its picture */
+    CrtMaskConfig crt_cfg;
+    if (i == HWC_DISPLAY_PRIMARY && !hd->is_interlaced)
+        crt_cfg = crt_mask_read_config();
+    comp_plane.crt_plane = NULL;
     for (std::vector<PlaneGroup *> ::const_iterator iter = plane_groups.begin();
         iter != plane_groups.end(); ++iter)
     {
+        if (crt_cfg.on && !comp_plane.crt_plane &&
+            GetCrtcSupported(*crtc, (*iter)->possible_crtcs))
+        {
+            DrmPlane *top = NULL;
+            for (DrmPlane *plane : (*iter)->planes)
+            {
+                if (plane->type() == DRM_PLANE_TYPE_CURSOR)
+                    top = plane;
+            }
+            if (top)
+            {
+                (*iter)->b_reserved = true;
+                crt_cfg.zpos = (*iter)->zpos;
+                comp_plane.crt_plane = top;
+                comp_plane.crt = crt_cfg;
+                ALOGD_IF(log_level(DBG_DEBUG),"CRT effect keeps plane %d, zpos %d", top->id(), crt_cfg.zpos);
+                continue;
+            }
+        }
 #ifdef USE_PLANE_RESERVED
         if (win1_reserved > 0 && GetCrtcSupported(*crtc, (*iter)->possible_crtcs) &&
           ((*iter)->planes.at(0)->type() == DRM_PLANE_TYPE_OVERLAY) &&
@@ -3706,6 +3730,8 @@ static int hwc_set(hwc_composer_device_1_t *dev, size_t num_displays,
             ALOGE("%s: SetCompPlanes fail",__FUNCTION__);
             goto err;
           }
+          composition->SetCrt(ctx->comp_plane_group[i].display, ctx->comp_plane_group[i].crt_plane,
+                              ctx->comp_plane_group[i].crt);
       }
       else
       {

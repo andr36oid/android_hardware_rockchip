@@ -1183,6 +1183,16 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
   }
 #endif
 
+    /* CRT effect: prepare kept this window free of layers for the picture */
+    DrmPlane *crt_plane = display_comp->crt_plane();
+    for (DrmCompositionPlane &comp_plane : comp_planes) {
+      if (crt_plane && comp_plane.plane() == crt_plane &&
+          comp_plane.type() != DrmCompositionPlane::Type::kDisable) {
+        ALOGE("CRT effect: plane %d got a layer, no effect this frame", crt_plane->id());
+        crt_plane = NULL;
+      }
+    }
+
     //Find out the fb target for clone layer.
     int fb_target_fb_id = -1;
 #ifdef USE_PLANE_RESERVED
@@ -1364,6 +1374,10 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
         continue;
     }
 #endif
+
+    // The CRT effect's window is filled in after the layers
+    if (fb_id < 0 && crt_plane && plane == crt_plane)
+      continue;
 
     if (fb_id < 0) {
       ret = drmModeAtomicAddProperty(pset, plane->id(),
@@ -1590,6 +1604,31 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
     out_log.clear();
   }
 
+  // CRT effect: its picture on top of everything, blended by the VOP
+  int crt_cursor = -1;
+  if (!ret && crt_plane) {
+    uint32_t mode_w = 0, mode_h = 0;
+    int mode_ret;
+    std::tie(mode_w, mode_h, mode_ret) = GetActiveModeResolution();
+    if (!crt_mask_)
+      crt_mask_.reset(new CrtMask(drm_));
+    crt_cursor = drmModeAtomicGetCursor(pset);
+    if (mode_ret || crt_mask_->AddToPset(pset, crtc, crt_plane, display_comp->crt(),
+                                         mode_w, mode_h)) {
+      drmModeAtomicSetCursor(pset, crt_cursor);
+      crt_cursor = -1;
+    }
+    if (crt_cursor < 0) {
+      // no picture: switch the window off like any unused one
+      crt_plane = NULL;
+      if (drmModeAtomicAddProperty(pset, display_comp->crt_plane()->id(),
+                                   display_comp->crt_plane()->crtc_property().id(), 0) < 0 ||
+          drmModeAtomicAddProperty(pset, display_comp->crt_plane()->id(),
+                                   display_comp->crt_plane()->fb_property().id(), 0) < 0)
+        ret = -EINVAL;
+    }
+  }
+
   if (!ret) {
     uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
     char vop_bw_str[50];
@@ -1620,6 +1659,22 @@ PRINT_TIME_START;
     usleep(new_value*1000);
 
     ret = drmModeAtomicCommit(drm_->fd(), pset, flags, drm_);
+    if (ret && crt_cursor >= 0) {
+      // the VOP said no with the CRT picture: try the frame without it, and if that
+      // works keep the effect off, a black screen would be worse
+      DrmPlane *p = display_comp->crt_plane();
+      drmModeAtomicSetCursor(pset, crt_cursor);
+      int off = drmModeAtomicAddProperty(pset, p->id(), p->crtc_property().id(), 0) < 0 ||
+                drmModeAtomicAddProperty(pset, p->id(), p->fb_property().id(), 0) < 0;
+      if (!off && !drmModeAtomicCommit(drm_->fd(), pset, flags, drm_)) {
+        ALOGE("Commit with the CRT effect failed ret=%d, it worked without", ret);
+        crt_mask_set_failed();
+        crt_plane = NULL;
+        ret = 0;
+      }
+    }
+    if (!ret && !test_only && crt_mask_)
+      crt_mask_->Committed(crt_plane != NULL);
     if (ret) {
       if (test_only)
         ALOGI("Commit test pset failed ret=%d\n", ret);

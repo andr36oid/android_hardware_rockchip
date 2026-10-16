@@ -93,7 +93,8 @@ LOCAL_SRC_FILES := \
 	worker.cpp \
 	hwc_util.cpp \
 	hwc_rockchip.cpp \
-	hwc_debug.cpp
+	hwc_debug.cpp \
+	crt_mask.cpp
 
 # API 30 -> Android 11.0
 ifneq (1,$(strip $(shell expr $(PLATFORM_SDK_VERSION) \< 30)))

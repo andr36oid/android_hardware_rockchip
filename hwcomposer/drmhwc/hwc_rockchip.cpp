@@ -1475,7 +1475,7 @@ static bool rkHasPlanesWithSize(DrmCrtc *crtc, int layer_size) {
     //loop plane groups.
     for (std::vector<PlaneGroup *> ::const_iterator iter = plane_groups.begin();
        iter != plane_groups.end(); ++iter) {
-            if(GetCrtcSupported(*crtc, (*iter)->possible_crtcs) && !(*iter)->bUse &&
+            if(GetCrtcSupported(*crtc, (*iter)->possible_crtcs) && !(*iter)->bUse && !(*iter)->b_reserved &&
                 (*iter)->planes.size() == (size_t)layer_size)
                 return true;
   }
@@ -1490,7 +1490,7 @@ static std::vector<DrmPlane *> rkGetNoAfbcUsablePlanes(DrmCrtc *crtc) {
     //loop plane groups.
     for (std::vector<PlaneGroup *> ::const_iterator iter = plane_groups.begin();
        iter != plane_groups.end(); ++iter) {
-            if(!(*iter)->bUse)
+            if(!(*iter)->bUse && !(*iter)->b_reserved)
                 //only count the first plane in plane group.
                 std::copy_if((*iter)->planes.begin(), (*iter)->planes.begin()+1,
                        std::back_inserter(usable_planes),
@@ -1509,7 +1509,7 @@ static std::vector<DrmPlane *> rkGetNoYuvUsablePlanes(DrmCrtc *crtc) {
     //loop plane groups.
     for (std::vector<PlaneGroup *> ::const_iterator iter = plane_groups.begin();
        iter != plane_groups.end(); ++iter) {
-            if(!(*iter)->bUse)
+            if(!(*iter)->bUse && !(*iter)->b_reserved)
                 //only count the first plane in plane group.
                 std::copy_if((*iter)->planes.begin(), (*iter)->planes.begin()+1,
                        std::back_inserter(usable_planes),
@@ -1527,7 +1527,7 @@ static std::vector<DrmPlane *> rkGetNoScaleUsablePlanes(DrmCrtc *crtc) {
     //loop plane groups.
     for (std::vector<PlaneGroup *> ::const_iterator iter = plane_groups.begin();
        iter != plane_groups.end(); ++iter) {
-            if(!(*iter)->bUse)
+            if(!(*iter)->bUse && !(*iter)->b_reserved)
                 //only count the first plane in plane group.
                 std::copy_if((*iter)->planes.begin(), (*iter)->planes.begin()+1,
                        std::back_inserter(usable_planes),
@@ -1545,7 +1545,7 @@ static std::vector<DrmPlane *> rkGetNoAlphaUsablePlanes(DrmCrtc *crtc) {
     //loop plane groups.
     for (std::vector<PlaneGroup *> ::const_iterator iter = plane_groups.begin();
        iter != plane_groups.end(); ++iter) {
-            if(!(*iter)->bUse)
+            if(!(*iter)->bUse && !(*iter)->b_reserved)
                 //only count the first plane in plane group.
                 std::copy_if((*iter)->planes.begin(), (*iter)->planes.begin()+1,
                        std::back_inserter(usable_planes),
@@ -1563,7 +1563,7 @@ static std::vector<DrmPlane *> rkGetNoEotfUsablePlanes(DrmCrtc *crtc) {
     //loop plane groups.
     for (std::vector<PlaneGroup *> ::const_iterator iter = plane_groups.begin();
        iter != plane_groups.end(); ++iter) {
-            if(!(*iter)->bUse)
+            if(!(*iter)->bUse && !(*iter)->b_reserved)
                 //only count the first plane in plane group.
                 std::copy_if((*iter)->planes.begin(), (*iter)->planes.begin()+1,
                        std::back_inserter(usable_planes),

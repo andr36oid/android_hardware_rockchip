@@ -38,6 +38,7 @@
 #define ANDROID_DRM_COMPOSITION_H_
 
 #include "drmhwcomposer.h"
+#include "crt_mask.h"
 #include "drmdisplaycomposition.h"
 #include "drmplane.h"
 #include "platform.h"
@@ -64,6 +65,9 @@ struct DrmCompositionDisplayLayersMap {
 struct DrmCompositionDisplayPlane {
   int display;
   std::vector<DrmCompositionPlane> composition_planes;
+  /* the window kept for the CRT effect this frame, or NULL */
+  DrmPlane *crt_plane = NULL;
+  CrtMaskConfig crt;
 
   DrmCompositionDisplayPlane() = default;
   DrmCompositionDisplayPlane(DrmCompositionDisplayPlane &&rhs) =
@@ -81,6 +85,7 @@ class DrmComposition {
   int SetDpmsMode(int display, uint32_t dpms_mode);
   int SetDisplayMode(int display, const DrmMode &display_mode);
   int SetCompPlanes(int display, std::vector<DrmCompositionPlane>& composition_planes);
+  void SetCrt(int display, DrmPlane *plane, const CrtMaskConfig &cfg);
 
   std::unique_ptr<DrmDisplayComposition> TakeDisplayComposition(int display);
   DrmDisplayComposition *GetDisplayComposition(int display);

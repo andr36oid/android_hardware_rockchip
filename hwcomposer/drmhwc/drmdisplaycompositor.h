@@ -238,6 +238,9 @@ class DrmDisplayCompositor {
   mutable pthread_mutex_t lock_;
   int vop_bw_fd_;
 
+  /* the CRT effect's picture, made on the first frame that wants it */
+  std::unique_ptr<CrtMask> crt_mask_;
+
   // State tracking progress since our last Dump(). These are mutable since
   // we need to reset them on every Dump() call.
   mutable uint64_t dump_frames_composited_;
