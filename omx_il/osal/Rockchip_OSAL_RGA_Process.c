@@ -21,6 +21,8 @@
  *   (e) remove or obscure any copyright, patent, or trademark statement or
  *   notices contained in the Software
  */
+#define LOG_TAG "omx_rga"
+#include <log/log.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -34,7 +36,9 @@
 #include "Rockchip_OSAL_Log.h"
 #include "Rockchip_OSAL_Memory.h"
 #include "Rockchip_OSAL_RGA_Process.h"
+#ifndef USE_DRM
 #include "hardware/rga.h"
+#endif
 
 #ifdef USE_DRM
 #include "drmrga.h"
@@ -73,11 +77,9 @@ OMX_S32 rga_dev_open(void **rga_ctx)
     *rga_ctx = ctx;
     return 0;
 #else
-    RgaInit(rga_ctx);
-    if (*rga_ctx == NULL) {
-        return -1;
-    }
-    return 0;
+    /* librga owns the shared context and does not return it to callers. */
+    *rga_ctx = NULL;
+    return c_RkRgaInit();
 #endif
 }
 
@@ -427,12 +429,11 @@ void rga_nv12_crop_scale(RockchipVideoPlane *plane,
 #endif
 }
 
-void rga_rgb2nv12(RockchipVideoPlane *plane, VPUMemLinear_t *vpumem,
-                  uint32_t Width, uint32_t Height, uint32_t dstWidth, uint32_t dstHeight,  void* rga_ctx)
+OMX_S32 rga_rgb2nv12(RockchipVideoPlane *plane, VPUMemLinear_t *vpumem,
+                  uint32_t Width, uint32_t Height, uint32_t dstWidth, uint32_t dstHeight, int format, void* rga_ctx)
 {
 
-    (void)dstWidth;
-    (void)dstHeight;
+    int ret;
 #ifndef USE_DRM
     rga_info_t src;
     rga_info_t dst;
@@ -441,11 +442,17 @@ void rga_rgb2nv12(RockchipVideoPlane *plane, VPUMemLinear_t *vpumem,
     memset((void*)&src, 0, sizeof(rga_info_t));
     memset((void*)&dst, 0, sizeof(rga_info_t));
     if (ctx == NULL) {
-        return;
+        return -ENODEV;
     }
-    rga_set_info(&src, Width, Height, plane->stride, Height, plane->fd, RK_FORMAT_RGBA_8888, (void *)plane->addr, plane->type);
+    int src_format = RK_FORMAT_RGBA_8888;
+    if (format == HAL_PIXEL_FORMAT_BGRA_8888)
+        src_format = RK_FORMAT_BGRA_8888;
+    else if (format == HAL_PIXEL_FORMAT_RGBX_8888)
+        src_format = RK_FORMAT_RGBX_8888;
+    rga_set_info(&src, Width, Height, plane->stride, Height, plane->fd, src_format, (void *)plane->addr, plane->type);
     rga_set_info(&dst, dstWidth, dstHeight, dstWidth, dstHeight, vpumem->phy_addr, RK_FORMAT_YCbCr_420_SP, (void *)vpumem->vir_addr, 0);
-    if (rga_convert(&src, &dst, ctx->rga_fd) < 0) {
+    ret = rga_convert(&src, &dst, ctx->rga_fd);
+    if (ret < 0) {
         omx_err("rga_rgb2nv12 fail");
     }
 #else
@@ -455,16 +462,21 @@ void rga_rgb2nv12(RockchipVideoPlane *plane, VPUMemLinear_t *vpumem,
     memset((void*)&src, 0, sizeof(rga_info_t));
     memset((void*)&dst, 0, sizeof(rga_info_t));
     omx_trace(" plane->stride %d", plane->stride);
-    rga_set_rect(&src.rect, 0, 0, Width, Height, plane->stride, Height, HAL_PIXEL_FORMAT_RGBA_8888);
+    rga_set_rect(&src.rect, 0, 0, Width, Height, plane->stride, Height, format);
     rga_set_rect(&dst.rect, 0, 0, Width, Height, dstWidth, dstHeight, HAL_PIXEL_FORMAT_YCrCb_NV12);
     src.fd = plane->fd;
-    dst.fd = vpumem->phy_addr;
+    dst.fd = VPUMemGetFD(vpumem);
+    src.mmuFlag = 1;
+    dst.mmuFlag = 1;
     omx_trace("RgaBlit in src.fd = 0x%x, dst.fd = 0x%x", src.fd, dst.fd);
-    if (RgaBlit(&src, &dst, NULL)) {
-        omx_err("RgaBlit fail");
+    ret = RgaBlit(&src, &dst, NULL);
+    if (ret != 0) {
+        ALOGE("Encoder RGA failed: fd=%d format=%#x stride=%u size=%ux%u dst_fd=%d dst_stride=%ux%u result=%d",
+              src.fd, format, (unsigned int)plane->stride, Width, Height, dst.fd, dstWidth, dstHeight, ret);
     }
     omx_trace("RgaBlit out");
 #endif
+    return ret;
 }
 
 void rga_nv122rgb( RockchipVideoPlane *planes, VPUMemLinear_t *vpumem, uint32_t Width, uint32_t Height, int dst_format, void* rga_ctx)

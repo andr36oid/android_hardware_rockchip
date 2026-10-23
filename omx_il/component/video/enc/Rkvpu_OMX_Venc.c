@@ -25,6 +25,7 @@
  */
 #undef  ROCKCHIP_LOG_TAG
 #define ROCKCHIP_LOG_TAG    "omx_venc"
+#define LOG_TAG ROCKCHIP_LOG_TAG
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -390,7 +391,6 @@ OMX_ERRORTYPE Rkvpu_ProcessStoreMetaData(OMX_COMPONENTTYPE *pOMXComponent, OMX_B
         }
     } else {
         RockchipVideoPlane vplanes;
-        OMX_COLOR_FORMATTYPE omx_format = 0;
         OMX_U32 res;
 
 #ifdef AVS80
@@ -411,20 +411,16 @@ OMX_ERRORTYPE Rkvpu_ProcessStoreMetaData(OMX_COMPONENTTYPE *pOMXComponent, OMX_B
             return OMX_ErrorBadParameter;
         }
 
-        if (pVideoEnc->bPixel_format < 0) {
-            int gpu_fd = -1;
-            omx_format = Rockchip_OSAL_GetANBColorFormat(pGrallocHandle);
-            pVideoEnc->bPixel_format = Rockchip_OSAL_OMX2HalPixelFormat(omx_format);//mali_gpu
-            gpu_fd = open("/dev/pvrsrvkm", O_RDWR, 0);
-            if (gpu_fd > 0) {
-                pVideoEnc->bRgb2yuvFlag = OMX_TRUE;
-                close(gpu_fd);
-            } else {
-                if (pVideoEnc->bPixel_format == HAL_PIXEL_FORMAT_RGBA_8888) {
-                    pVideoEnc->bRgb2yuvFlag = OMX_TRUE;
-                }
-            }
+        gralloc_private_handle_t priv_hnd;
+        Rockchip_OSAL_Memset(&priv_hnd, 0, sizeof(priv_hnd));
+        if (Rockchip_get_gralloc_private(pGrallocHandle, &priv_hnd) != 0) {
+            return OMX_ErrorBadParameter;
         }
+        pVideoEnc->bPixel_format = priv_hnd.format;
+        pVideoEnc->bRgb2yuvFlag =
+            (priv_hnd.format == HAL_PIXEL_FORMAT_RGBA_8888 ||
+             priv_hnd.format == HAL_PIXEL_FORMAT_RGBX_8888 ||
+             priv_hnd.format == HAL_PIXEL_FORMAT_BGRA_8888) ? OMX_TRUE : OMX_FALSE;
         res = Rockchip_OSAL_getANBHandle(pGrallocHandle, &vplanes);
         if (res != 0) {
             omx_err("Unable to lock image buffer %p for access", pGrallocHandle);
@@ -432,6 +428,11 @@ OMX_ERRORTYPE Rkvpu_ProcessStoreMetaData(OMX_COMPONENTTYPE *pOMXComponent, OMX_B
             return OMX_ErrorBadParameter;
         }
 
+        if (pVideoEnc->bFrame_num == 0) {
+            ALOGE("Encoder metadata: type=%u bytes=%u fd=%d format=%#x stride=%u size=%d rgb2nv12=%d",
+                  (unsigned int)*(OMX_U32 *)pInputBuffer->pBuffer, (unsigned int)pInputBuffer->nFilledLen,
+                  (int)vplanes.fd, priv_hnd.format, (unsigned int)vplanes.stride, priv_hnd.size, pVideoEnc->bRgb2yuvFlag);
+        }
         if (pVideoEnc->bRgb2yuvFlag == OMX_TRUE) {
             VPUMemLinear_t tmp_vpumem;
             OMX_U32 new_width = 0;
@@ -450,8 +451,16 @@ OMX_ERRORTYPE Rkvpu_ProcessStoreMetaData(OMX_COMPONENTTYPE *pOMXComponent, OMX_B
                 new_height = (Height + 7) & ~7;
             }
             memset(&tmp_vpumem, 0, sizeof(VPUMemLinear_t));
-            rga_rgb2nv12(&vplanes, pVideoEnc->enc_vpumem, Width, Height, new_width, new_height, pVideoEnc->rga_ctx);
-            VPUMemClean(pVideoEnc->enc_vpumem);
+            int rga_ret = rga_rgb2nv12(&vplanes, pVideoEnc->enc_vpumem, Width, Height,
+                                      new_width, new_height, priv_hnd.format, pVideoEnc->rga_ctx);
+            if (rga_ret != 0 || pVideoEnc->bFrame_num == 0) {
+                ALOGE("Encoder surface: fd=%d format=%#x stride=%u size=%d dst_fd=%d result=%d",
+                      (int)vplanes.fd, priv_hnd.format, (unsigned int)vplanes.stride, priv_hnd.size,
+                      VPUMemGetFD(pVideoEnc->enc_vpumem), rga_ret);
+            }
+            if (rga_ret != 0) {
+                return OMX_ErrorUndefined;
+            }
             *aPhy_address = pVideoEnc->enc_vpumem->phy_addr;
             *len = new_width * new_height * 3 / 2;
             if (pVideoEnc->fp_enc_in) {
@@ -459,7 +468,8 @@ OMX_ERRORTYPE Rkvpu_ProcessStoreMetaData(OMX_COMPONENTTYPE *pOMXComponent, OMX_B
                 fwrite(pVideoEnc->enc_vpumem->vir_addr, 1, (*len), pVideoEnc->fp_enc_in);
                 fflush(pVideoEnc->fp_enc_in);
             }
-        } else if (pVideoEnc->bPixel_format == HAL_PIXEL_FORMAT_YCrCb_NV12) {
+        } else if (pVideoEnc->bPixel_format == HAL_PIXEL_FORMAT_YCrCb_NV12 ||
+                   pVideoEnc->bPixel_format == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
             *len = Rkvpu_N12_Process(pOMXComponent, &vplanes, aPhy_address);
         } else if (pVideoEnc->bPixel_format == HAL_PIXEL_FORMAT_YCbCr_420_888) {
             H264EncPictureType encType = VPU_H264ENC_YUV420_SEMIPLANAR;
@@ -570,8 +580,7 @@ OMX_BOOL Rkvpu_SendInputData(OMX_COMPONENTTYPE *pOMXComponent)
                 Rkvpu_InputBufferReturn(pOMXComponent, inputUseBuffer);
                 pRockchipComponent->pCallbacks->EventHandler((OMX_HANDLETYPE)pOMXComponent,
                                                              pRockchipComponent->callbackData, OMX_EventError,
-                                                             OUTPUT_PORT_INDEX,
-                                                             OMX_IndexParamPortDefinition, NULL);
+                                                             ret, 0, NULL);
                 goto EXIT;
             }
 
@@ -617,7 +626,8 @@ OMX_BOOL Rkvpu_SendInputData(OMX_COMPONENTTYPE *pOMXComponent)
 #endif
 
         if (rockchipInputPort->portDefinition.format.video.eColorFormat == OMX_COLOR_FormatAndroidOpaque) {
-            if ((pVideoEnc->bRgb2yuvFlag == OMX_TRUE) || (pVideoEnc->bPixel_format == HAL_PIXEL_FORMAT_YCrCb_NV12)) {
+            if ((pVideoEnc->bRgb2yuvFlag == OMX_TRUE) || (pVideoEnc->bPixel_format == HAL_PIXEL_FORMAT_YCrCb_NV12) ||
+                (pVideoEnc->bPixel_format == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED)) {
                 omx_trace("set as nv12 format");
                 H264EncPictureType encType = VPU_H264ENC_YUV420_SEMIPLANAR;
                 p_vpu_ctx->control(p_vpu_ctx, VPU_API_ENC_SETFORMAT, (void *)&encType);

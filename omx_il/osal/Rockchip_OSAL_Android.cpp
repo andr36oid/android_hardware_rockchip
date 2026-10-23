@@ -25,6 +25,7 @@
  */
 #undef  ROCKCHIP_LOG_TAG
 #define ROCKCHIP_LOG_TAG    "omx_osal_android"
+#define LOG_TAG ROCKCHIP_LOG_TAG
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,7 +129,12 @@ OMX_ERRORTYPE Rockchip_OSAL_getANBHandle(
     OMX_ERRORTYPE ret = OMX_ErrorNone;
     gralloc_private_handle_t priv_hnd;
     Rockchip_OSAL_Memset(&priv_hnd, 0, sizeof(priv_hnd));
-    Rockchip_get_gralloc_private((uint32_t*)handle, &priv_hnd);
+    if (Rockchip_get_gralloc_private((uint32_t*)handle, &priv_hnd) != 0 ||
+        priv_hnd.share_fd < 0 || priv_hnd.stride <= 0 || priv_hnd.size <= 0) {
+        ALOGE("Invalid encoder buffer: fd=%d format=%#x stride=%d size=%d",
+              priv_hnd.share_fd, priv_hnd.format, priv_hnd.stride, priv_hnd.size);
+        return OMX_ErrorBadParameter;
+    }
     RockchipVideoPlane *vplanes = (RockchipVideoPlane *)planes;
     vplanes[0].fd = priv_hnd.share_fd;
     vplanes[0].offset = 0;

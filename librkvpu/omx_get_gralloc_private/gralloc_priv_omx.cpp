@@ -26,6 +26,8 @@
 
 #include <log/log.h>
 #include <hardware/gralloc.h>
+#include <errno.h>
+#include <string.h>
 #include "gralloc_priv_omx.h"
 #if defined (GPU_G6110)
 #include <hardware/img_gralloc_public.h>
@@ -43,9 +45,11 @@
 #endif
 
 int32_t Rockchip_get_gralloc_private(uint32_t *handle,gralloc_private_handle_t *private_hnd){
-    if(private_hnd == NULL){
-        return -1;
+    if(handle == NULL || private_hnd == NULL){
+        return -EINVAL;
     }
+    memset(private_hnd, 0, sizeof(*private_hnd));
+    private_hnd->share_fd = -1;
 #ifdef USE_GRALLOC_4
     private_handle_t priv_hnd = (private_handle_t)handle;
     int format_requested, share_fd, pixel_stride,err;
@@ -54,7 +58,7 @@ int32_t Rockchip_get_gralloc_private(uint32_t *handle,gralloc_private_handle_t *
     if (err != android::OK )
     {
         E("get_format_requested err : %d", err);
-        //return err;
+        return err;
     }else{
         private_hnd->format = format_requested;
     }
@@ -62,7 +66,7 @@ int32_t Rockchip_get_gralloc_private(uint32_t *handle,gralloc_private_handle_t *
     if (err != android::OK )
     {
         E("get_share_fd err : %d", err);
-        //return err;
+        return err;
     }else{
         private_hnd->share_fd = share_fd;
     }
@@ -70,7 +74,7 @@ int32_t Rockchip_get_gralloc_private(uint32_t *handle,gralloc_private_handle_t *
     if (err != android::OK )
     {
         E("get_pixel_stride err : %d", err);
-        //return err;
+        return err;
     }else{
         private_hnd->stride = pixel_stride;
     }
@@ -78,13 +82,24 @@ int32_t Rockchip_get_gralloc_private(uint32_t *handle,gralloc_private_handle_t *
     if (err != android::OK )
     {
         E("get_allocation_size err : %d", err);
-        //return err;
+        return err;
     }else{
         private_hnd->size = (int)allocation_size;
     }
 
 #else
     private_handle_t *priv_hnd = (private_handle_t *)handle;
+#ifdef USE_DRM
+    if (priv_hnd->base.version != sizeof(native_handle_t) ||
+        priv_hnd->base.numFds != GRALLOC_DRM_HANDLE_NUM_FDS ||
+        priv_hnd->base.numInts != GRALLOC_DRM_HANDLE_NUM_INTS ||
+        priv_hnd->magic != GRALLOC_DRM_HANDLE_MAGIC) {
+        ALOGE("Invalid OMX gralloc handle: version=%d fds=%d ints=%d magic=%#x",
+              priv_hnd->base.version, priv_hnd->base.numFds,
+              priv_hnd->base.numInts, priv_hnd->magic);
+        return -EINVAL;
+    }
+#endif
     private_hnd->format = priv_hnd->format;
 
 #ifdef USE_DRM

@@ -41,6 +41,7 @@
 #include "Rockchip_OSAL_SharedMemory.h"
 #include "Rockchip_OSAL_Queue.h"
 #include <hardware/hardware.h>
+#include <hardware/gralloc.h>
 #include "hardware/rga.h"
 #include <fcntl.h>
 #include <poll.h>
@@ -974,6 +975,13 @@ OMX_ERRORTYPE Rkvpu_OMX_GetParameter(
     }
 
     switch ((OMX_U32)nParamIndex) {
+    case OMX_IndexParamConsumerUsageBits: {
+        /* GraphicBufferSource queries a raw OMX_U32 on Android 11. */
+        OMX_U32 *usage = (OMX_U32 *)ComponentParameterStructure;
+        *usage = GRALLOC_USAGE_HW_VIDEO_ENCODER | GRALLOC_USAGE_HW_TEXTURE |
+                 GRALLOC_USAGE_EXTERNAL_DISP;
+    }
+    break;
     case OMX_IndexParamVideoInit: {
         OMX_PORT_PARAM_TYPE *portParam = (OMX_PORT_PARAM_TYPE *)ComponentParameterStructure;
         ret = Rockchip_OMX_Check_SizeVersion(portParam, sizeof(OMX_PORT_PARAM_TYPE));
